@@ -1,0 +1,4 @@
+rm out.pgm
+make clean
+make 
+./threshe in_pgm.pgm out.pgm

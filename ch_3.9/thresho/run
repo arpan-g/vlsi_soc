@@ -1,0 +1,6 @@
+#!/bin/bash
+# My first script
+
+make clean
+make
+./thresho in_pgm.pgm out.pgm
