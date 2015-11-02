@@ -17,8 +17,8 @@
 #include <tiffimage.h>
 #include <math.h>
 #include <string.h>
-#include "fixedptc.h"
 extern void print_sos_lic ();
+
 
 #define NHIST 256               /* no. bins in histogram */
 
@@ -31,20 +31,25 @@ main (int argc, char *argv[])
   unsigned char **imgIn, **imgOut;  /* input and output images */
   long width, height;           /* image size */
   long iHist[NHIST];            /* hist. of intensities */
-  fixedpt m0Low, m0High, m1Low, m1High, varLow, varHigh;
-  fixedpt prob[NHIST];
-  double tempProb,tempm0Low,tempm1Low,tempm0High,tempm1High,tempvarLow,tempvarHigh,tempvarWithin,varWMin;
-  fixedpt varWithin;
-  fixedpt thresh;
+  int32_t m0Low, m0High, m1Low, m1High, varLow, varHigh;
+  int32_t prob[NHIST];
+  int32_t varWithin, varWMin;
+  int32_t thresh;
+  // int64_t m0Low, m0High, m1Low, m1High, varLow, varHigh;
+  // int64_t prob[NHIST];
+  // int64_t varWithin, varWMin;
+  // int64_t thresh;
   short invertFlag;             /* if =0, dark -> ON; if =1, dark -> OFF */
-  fixedpt nHistM1;
-  fixedpt x, y;                    /* image coordinates */
-  fixedpt i, j, n;
-
+  long nHistM1;
+  long x, y;                    /* image coordinates */
+  long i, j, n;
+  int32_t scale =14;
+  int32_t ad = 2;
 
   if (input (argc, argv, &invertFlag) < 0)
     return (-1);
-
+   //scale = strtol(argv[2], NULL, 0);
+   printf("%d\n",scale );
 /* allocate input and output image memory */
   imgI = ImageIn (argv[1]);
   imgIn = ImageGetPtr (imgI);
@@ -52,7 +57,6 @@ main (int argc, char *argv[])
   width = ImageGetWidth (imgI);
   imgO = ImageAlloc (height, width, 8);
   imgOut = ImageGetPtr (imgO);
-  printf("height %ld width %ld\n",height,width );
 
 /* compile histogram */
   printf ("MAIN: Compile histogram...\n");
@@ -62,77 +66,53 @@ main (int argc, char *argv[])
     for (x = 0; x < width; x++) {
       iHist[imgIn[y][x]]++;
       n++;
-      
     }
-
   }
-  printf("Histogram\n");
-  for (i = 0; i < NHIST; i++)
-   printf("%ld\t",iHist[i]); 
- printf("Histogram\n");
 
 /* compute probabilities */
- printf("prob\n");
   for (i = 0; i < NHIST; i++){
-    tempProb = (double) iHist[i] / (double) n;
-     prob[i] = fixedpt_fromfloat(tempProb);
-    printf(" %d\t ",tempProb);
-    //printf("%f\t",prob[i]);
+    prob[i] =  (iHist[i]<<scale) / n;
+    
   }
-printf("prob\n");
 
 /* find best threshold by computing moments for all thresholds */
   nHistM1 = NHIST - 1;
-  printf("j\tm0Low\t,m1Low\t,m0High,\t,m1High\tvarLow\tvarHigh\tvarWithin\n");
-  for (i = 1, thresh = 0, varWMin = 10000000.0; i < nHistM1; i++) {
-    m0Low = m0High = m1Low = m1High = varLow = varHigh = 0.0;
-    tempm0Low = tempm1Low =tempm0High=tempm1High= tempvarLow = tempvarHigh = tempvarWithin = 0.0;
+  for (i = 1, thresh = 0, varWMin = 0x7fffffff; i < nHistM1; i++) {
+    m0Low = m0High = m1Low = m1High = varLow = varHigh = 0;
     for (j = 0; j <= i; j++) {
-      tempm0Low = prob[j];
-      tempm1Low = j * prob[j];
-      m0Low = fixedpt_fromfloat(tempm0Low) ;
-      m1Low = fixedpt_fromfloat(tempm1Low);  
+      m0Low += prob[j];
+      m1Low += j * prob[j];
     }
 
-    m1Low = (m0Low != 0.0) ? fixedpt_div(m1Low ,m0Low) : i;
-     //printf("m0Low:%d\t %f \t ",j,tempm0Low);
-   // printf("m0Low:%d\t %f \t ",j,tempm1Low);
+    m1Low = (m0Low != 0) ? (m1Low<<ad) / m0Low : i<<ad;
+    //printf("%d %d\n",m1Low,i);
     for (j = i + 1; j < NHIST; j++) {
-      tempm0High += prob[j];
-      tempm1High += j * prob[j];
-      m0High = fixedpt_fromfloat(tempm0High) ;
-      m1High = fixedpt_fromfloat(tempm1High);
-
+      m0High += prob[j];
+      m1High += j * prob[j];
     }
-    //printf("m0High:%d\t %f \t ",j,tempm0High);
-    //printf("m1High:%d\t %f \t ",j,tempm1High);
-    m1High = (m0High != 0.0) ? fixedpt_div(m1High, m0High) : i;
-    for (j = 0; j <= i; j++){
-      tempvarLow += (j - m1Low) * (j - m1Low) * prob[j];
-      varLow = fixedpt_fromfloat(tempvarLow);
+    m1High = (m0High != 0) ? (m1High<<ad) / m0High : i<<ad;
      
+    // printf("new \n");
+    for (j = 0; j <= i; j++){
+     varLow += ((((j<<ad) - m1Low) * ((j<<ad) - m1Low) * prob[j])>>scale);
+      
     }
-     //printf("varLow:%d \t %f, \n",j,tempvarLow);
     for (j = i + 1; j < NHIST; j++){
-      tempvarHigh += (j - m1High) * (j - m1High) * prob[j];
-      varHigh = fixedpt_fromfloat(tempvarHigh);
-      //printf("float: %f, fixed point: %s \n",tempvarHigh,fixedpt_cstr(varHigh,-1));
+      varHigh += ((((j<<ad) - m1High) * ((j<<ad) - m1High) * prob[j])>>scale);
     }
-
-    tempvarWithin = m0Low * varLow + m0High * varHigh;
-    printf("%d\t\t%f\t\t%f\t\t%f\t\t%f\t\t%f\t\t%f\t\t%f\n",i,tempm0Low,
-      tempm1Low,tempm0High,tempm1High,tempvarLow,tempvarHigh,tempvarWithin);
-    varWithin = fixedpt_fromfloat(tempvarWithin);
-    //printf("float: %f, fixed point: %s \n",tempvarWithin,fixedpt_cstr(varWithin,-1));
-    //printf("%s\t",fixedpt_cstr(varWithin,-1) );
+     //printf("%d\t%d\t%d\n",m0High,m1High,i);
+     //printf("%d\t%d\t%d\n",m0Low,m1Low,i);
+     //printf("%d\t%d\t%d\n",varLow,varHigh,i);
+     varWithin = m0Low * varLow + m0High * varHigh;
+    printf("%d\t%d\t%d\n",varWMin,varHigh,varWithin);
     if (varWithin < varWMin) {
-      varWMin = fixedpt_tofloat(varWithin);
+      varWMin = varWithin;
       thresh = i;
     }
   }
 
 /*  printf ("Min variance is %5.2f at %d\n", varWMin, thresh); */
-  printf ("Calculated threshold value (by Otsu method) = %d\n", thresh);
+  printf ("Calculated threshold value (by Otsu method) = %d\t", thresh);
 
 /* output thresholded image */
   if (invertFlag == 0) {
@@ -146,7 +126,7 @@ printf("prob\n");
         imgOut[y][x] = (imgIn[y][x] < thresh) ? 255 : 0;
   }
 
-  ImageOut (argv[2], imgO);
+  ImageOut ("out.pgm", imgO);
 }
 
 

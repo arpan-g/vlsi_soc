@@ -1,44 +1,44 @@
 /* 
- * threshe.c
+ * thresho.c
  * 
  * Practical Algorithms for Image Analysis
  * 
  * Copyright (c) 1997, 1998, 1999 MLMSoftwareGroup, LLC
  */
 
-/* THRESHE:     program performs binarization by maximum entropy method
- *                    usage: threshe inimg outimg [-i] [-L]
+/* THRESHO:     program performs binarization by Otsu's discriminant method
+ *                    usage: thresho inimg outimg [-i] [-L]
  *
  */
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <images.h>
 #include <tiffimage.h>
 #include <math.h>
+#include <string.h>
 extern void print_sos_lic ();
 
 #define NHIST 256               /* no. bins in histogram */
 
-long input (int, char **, short *);
 long usage (short);
+long input (int, char **, short *);
 
-main (
-       int argc,
-       char *argv[])
+main (int argc, char *argv[])
 {
   Image *imgI, *imgO;           /* I/O image structures */
   unsigned char **imgIn, **imgOut;  /* input and output images */
   long width, height;           /* image size */
   long iHist[NHIST];            /* hist. of intensities */
+  double m0Low, m0High, m1Low, m1High, varLow, varHigh;
   double prob[NHIST];
-  double Hn, Ps, Hs;
-  double psi, psiMax;
+  double varWithin, varWMin;
   long thresh;
   short invertFlag;             /* if =0, dark -> ON; if =1, dark -> OFF */
+  long nHistM1;
   long x, y;                    /* image coordinates */
   long i, j, n;
+
 
   if (input (argc, argv, &invertFlag) < 0)
     return (-1);
@@ -63,34 +63,38 @@ main (
   }
 
 /* compute probabilities */
-  for (i = 0; i < NHIST; i++){
+  for (i = 0; i < NHIST; i++)
     prob[i] = (double) iHist[i] / (double) n;
-	
-}
-	
 
-/* find threshold */
-  for (i = 0, Hn = 0.0; i < NHIST; i++)
-    if (prob[i] != 0.0){
-      Hn -= prob[i] * log (prob[i]);
-	printf("%f \t",log (prob[i]));
-}
-
-  for (i = 1, psiMax = 0.0; i < NHIST; i++) {
-    for (j = 0, Ps = Hs = 0.0; j < i; j++) {
-      Ps += prob[j];
-      if (prob[j] > 0.0)
-        Hs -= prob[j] * log (prob[j]);
+/* find best threshold by computing moments for all thresholds */
+  nHistM1 = NHIST - 1;
+  for (i = 1, thresh = 0, varWMin = 100000000.0; i < nHistM1; i++) {
+    m0Low = m0High = m1Low = m1High = varLow = varHigh = 0.0;
+    for (j = 0; j <= i; j++) {
+      m0Low += prob[j];
+      m1Low += j * prob[j];
     }
-    if (Ps > 0.0 && Ps < 1.0)
-      psi = log (Ps - Ps * Ps) + Hs / Ps + (Hn - Hs) / (1.0 - Ps);
-    if (psi > psiMax) {
-      psiMax = psi;
+    m1Low = (m0Low != 0.0) ? m1Low / m0Low : i;
+    for (j = i + 1; j < NHIST; j++) {
+      m0High += prob[j];
+      m1High += j * prob[j];
+    }
+    m1High = (m0High != 0.0) ? m1High / m0High : i;
+    for (j = 0; j <= i; j++)
+      varLow += (j - m1Low) * (j - m1Low) * prob[j];
+    for (j = i + 1; j < NHIST; j++)
+      varHigh += (j - m1High) * (j - m1High) * prob[j];
+
+    varWithin = m0Low * varLow + m0High * varHigh;
+     printf("%f\t%f\t%f\n",varLow,varHigh,varWithin);
+    if (varWithin < varWMin) {
+      varWMin = varWithin;
       thresh = i;
     }
   }
 
-  printf ("Calculated threshold value (by Entropy method) = %d.\n", thresh);
+/*  printf ("Min variance is %5.2f at %d\n", varWMin, thresh); */
+  printf ("Calculated threshold value (by Otsu method) = %d\n", thresh);
 
 /* output thresholded image */
   if (invertFlag == 0) {
@@ -105,8 +109,6 @@ main (
   }
 
   ImageOut (argv[2], imgO);
-
-  return (0);
 }
 
 
@@ -122,15 +124,15 @@ usage (flag)
 {
 
 /* print short usage message or long */
-  printf ("USAGE: threshe inimg outimg [-i] [-L]\n");
+  printf ("USAGE: thresho inimg outimg [-i] [-L]\n");
   if (flag == 0)
-    return (-1);
+    exit (1);
 
-  printf ("\nthreshe performs binarization with respect to\n");
+  printf ("\nthresho program performs binarization with respect to\n");
   printf ("automatically determined intensity threshold;\n");
   printf ("the input gray-level image is converted to a binary image;\n");
-  printf ("threshold determination is made by the maximum entropy\n");
-  printf ("method.\n\n");
+  printf ("threshold determination is made by Otsu's\n");
+  printf ("moment preservation method.\n\n");
   printf ("ARGUMENTS:\n");
   printf ("    inimg: input image filename (TIF)\n");
   printf ("   outimg: output image filename (TIF)\n\n");
@@ -143,18 +145,17 @@ usage (flag)
 }
 
 
+#define USAGE_EXIT(VALUE) {usage (VALUE); return (-1);}
+
 /* INPUT:       function reads input parameters
  *                  usage: input (argc, argv)
  */
-
-#define USAGE_EXIT(VALUE) {usage (VALUE); return (-1);}
 
 long
 input (argc, argv, invertFlag)
      int argc;
      char *argv[];
      short *invertFlag;         /* if =0, dark -> ON; if =1, dark -> OFF */
-
 {
   long n;
 

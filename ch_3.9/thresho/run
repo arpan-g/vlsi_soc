@@ -1,6 +1,8 @@
-#!/bin/bash
-# My first script
 
+rm out.pgm
 make clean
-make
-./thresho in_pgm.pgm out.pgm
+make 
+./thresho in_pgm.pgm 0
+
+
+
